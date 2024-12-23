@@ -1,931 +1,639 @@
-// worker.js
-import { connect } from "cloudflare:sockets";
-
-var listProxy = [
-  { path: "/MALASIA", proxy: "45.195.69.98:30726" },
-  { path: "/INDONESIA", proxy: "103.186.1.209:2053" },
-  { path: "/SINGAPORE", proxy: "143.198.213.197:8443" },
-  // tambahkan sendiri
-];
-
-var proxyIP;
-var worker_default = {
-  async fetch(request, ctx) {
-    try {
-      proxyIP = proxyIP;
-      const url = new URL(request.url);
-      const upgradeHeader = request.headers.get("Upgrade");
-      for (const entry of listProxy) {
-        if (url.pathname === entry.path) {
-          proxyIP = entry.proxy;
-          break;
-        }
-      }
-      if (upgradeHeader === "websocket" && proxyIP) {
-        return await vlessOverWSHandler(request);
-      }
-      const allConfig = await getAllConfigVless(request.headers.get("Host"));
-      return new Response(allConfig, {
-        status: 200,
-        headers: { "Content-Type": "text/html;charset=utf-8" }
-      });
-    } catch (err) {
-      return new Response(err.toString(), { status: 500 });
-    }
-  }
-};
-
-async function getAllConfigVless(hostName) {
-  try {
-    let vlessConfigs = "";
-    let clashConfigs = "";
-    for (const entry of listProxy) {
-      const { path, proxy } = entry;
-      const [proxyAddress, proxyPort] = proxy.split(":");
-      const response = await fetch(`http://ip-api.com/json/${proxyAddress}`);
-      const data = await response.json();
-      const pathFixed = encodeURIComponent(path);
-      const vlessTls = `vless://${generateUUIDv4()}@Quiz.vidio.com:443?encryption=none&security=tls&sni=${hostName}&fp=randomized&type=ws&host=${hostName}&path=${pathFixed}#${hostName} (${data.countryCode})`;
-      const vlessNtls = `vless://${generateUUIDv4()}@${hostName}:80?path=${pathFixed}&security=none&encryption=none&host=${hostName}&fp=randomized&type=ws#${data.isp} (${data.countryCode})`;
-      const vlessTlsFixed = vlessTls.replace(/ /g, "+");
-      const vlessNtlsFixed = vlessNtls.replace(/ /g, "+");
-      const clashConfTls = `- name: ${data.isp} (${data.countryCode})
-  server: ${hostName}
-  port: 443
-  type: vless
-  uuid: ${generateUUIDv4()}
-  tls: true
-  udp: true
-  skip-cert-verify: true
-  network: ws
-  servername: ${hostName}
-  ws-opts:
-    path: ${path}
-    headers:
-      Host: ${hostName}`;
-      const clashConfNtls = `- name: ${data.isp} (${data.countryCode})
-  server: ${hostName}
-  port: 80
-  type: vless
-  uuid: ${generateUUIDv4()}
-  udp: true
-  network: ws
-  ws-opts:
-    path: ${path}
-    headers:
-      Host: ${hostName}`;
-      clashConfigs += `<div style="display: none;">
-   <textarea id="clashTls${path}">${clashConfTls}</textarea>
- </div>
-<div style="display: none;">
-   <textarea id="clashNtls${path}">${clashConfNtls}</textarea>
- </div>
-<div class="config-section">
-    <p><strong>ISP  :  ${data.isp} (${data.countryCode})</strong> </p>
-    <hr/>
-    <div class="config-toggle">
-        <button class="button" onclick="toggleConfig(this, 'show clash', 'hide clash')">Show Clash</button>
-        <div class="config-content">
-            <div class="config-block">
-                <h3>TLS:</h3>
-                <p class="config">${clashConfTls}</p>
-                <button class="button" onclick='copyClash("clashTls${path}")'><i class="fa fa-clipboard"></i>Copy</button>
-            </div>
-            <hr />
-            <div class="config-block">
-                <h3>NTLS:</h3>
-                <p class="config">${clashConfNtls}</p>
-                <button class="button" onclick='copyClash("clashNtls${path}")'><i class="fa fa-clipboard"></i>Copy</button>
-            </div>
-        </div>
-    </div>
-</div>
-<hr class="config-divider" />
-`;
-      vlessConfigs += `<div class="config-section">
-    <p><strong>ISP  :  ${data.isp} (${data.countryCode}) </strong> </p>
-    <hr />
-    <div class="config-toggle">
-        <button class="button" onclick="toggleConfig(this, 'show vless', 'hide vless')">Show Vless</button>
-        <div class="config-content">
-            <div class="config-block">
-                <h3>TLS:</h3>
-                <p class="config">${vlessTlsFixed}</p>
-                <button class="button" onclick='copyToClipboard("${vlessTlsFixed}")'><i class="fa fa-clipboard"></i>Copy</button>
-            </div>
-            <hr />
-            <div class="config-block">
-                <h3>NTLS:</h3>
-                <p class="config">${vlessNtlsFixed}</p>
-                <button class="button" onclick='copyToClipboard("${vlessNtlsFixed}")'><i class="fa fa-clipboard"></i>Copy</button>
-            </div>
-            <hr />
-        </div>
-    </div>
-</div>
-<hr class="config-divider" />
-`;
-    }
-    const htmlConfigs = `
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Vless | Noir7R | CLoudFlare</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css" integrity="sha512-Fo3rlrZj/k7ujTnHg4C+6PCWJ+8zzHcXQjXGp6n5Yh9rX0x5fOdPaOqO+e2X4R5C1aE/BSqPIG+8y3O6APa8w==" crossorigin="anonymous" referrerpolicy="no-referrer" />
-    <link rel="icon" href="https://raw.githubusercontent.com/AFRcloud/BG/main/icons8-film-noir-80.png" type="image/png">
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
-
-        body {
-            margin: 0;
-            padding: 0;
-            font-family: 'Poppins', sans-serif;
-            color: #f5f5f5;
-            background-color: black;
-            display: flex;
-            align-items: center;
-            flex-direction: column;
-            min-height: 100vh;
-            overflow: hidden;
-        }
-
-        .container {
-            max-width: 1200px;
-            width: 100%;
-            margin: 3px;
-            background: rgba(0, 0, 0, 0.9);
-            backdrop-filter: blur(8px);
-            -webkit-backdrop-filter: blur(8px);
-            animation: fadeIn 1s ease-in-out;
-            overflow-y: auto;
-            max-height: 100vh;
-        }
-
-        .overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(15, 15, 15, 0.4);
-            z-index: -1;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 40px;
-            margin-top: 10px;
-        }
-
-        .header h1 {
-            font-size: 42px;
-            color: yellow;
-            margin: 0;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 4px;
-        }
-
-        .nav-buttons {
-            display: flex;
-            justify-content: center;
-            margin-top: 20px;
-            margin-bottom: 20px;
-            gap: 10px;
-        }
-
-        .nav-buttons .button {
-            background-color: transparent;
-            border: 3px solid yellow;
-            color: yellow;
-            padding: 6px 12px;
-            font-size: 20px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            text-transform: uppercase;
-            letter-spacing: 3px;
-        }
-
-        .nav-buttons .button:hover {
-            background-color: yellow;
-            color: #fff;
-            transform: scale(1.05);
-        }
-
-        .content {
-            display: none;
-            opacity: 0;
-            transition: opacity 0.5s ease-in-out;
-        }
-
-        .content.active {
-            display: block;
-            opacity: 1;
-        }
-
-        .config-section {
-            background: rgba(0, 0, 0, 0.5);
-            padding: 20px;
-            margin-right: 5px;
-            margin-left: 5px;
-            border: 2px solid yellow;
-            border-radius: 10px;
-            position: relative;
-            animation: slideIn 0.5s ease-in-out;
-        }
-
-        @keyframes slideIn {
-            from { transform: translateX(-30px); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
-        }
-
-        .config-section h3 {
-            margin-top: 0;
-            color: #e1b12c;
-            font-size: 28px;
-        }
-
-        .config-section p {
-            color: #f5f5f5;
-            font-size: 16px;
-        }
-
-        .config-toggle {
-            margin-bottom: 10px;
-        }
-
-        .config-content {
-            display: none;
-        }
-
-        .config-content.active {
-            display: block;
-        }
-
-        .config-block {
-            margin-bottom: 10px;
-            padding: 15px;
-            border-radius: 10px;
-            background-color: rgba(0, 0, 0, 0.2);
-            transition: background-color 0.3s ease;
-        }
-
-        .config-block h4 {
-            margin-bottom: 8px;
-            color: #f39c12;
-            font-size: 22px;
-            font-weight: 600;
-        }
-
-        .config {
-            background-color: rgba(0, 0, 0, 0.2);
-            padding: 15px;
-            border-radius: 5px;
-            border: 2px solid yellow;
-            color: #f5f5f5;
-            word-wrap: break-word;
-            white-space: pre-wrap;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 15px;
-        }
-        .button {
-            background-color: transparent;
-            border: 2px solid yellow;
-            color: yellow;
-            padding: 4px 8px;
-            font-size: 12px;
-            border-radius: 3px;
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            transition: all 0.3s ease;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            margin-right: 4px;
-        }
-
-        .button i {
-            margin-right: 3px;
-        }
-
-        .button:hover {
-            background-color: yellow;
-            color: #fff;
-            transform: scale(1.0);
-        }
-
-        .config-divider {
-            border: none;
-            height: 1px;
-            background: linear-gradient(to right, transparent, #fff, transparent);
-            margin: 20px 0;
-        }
-        .watermark {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 0.8rem;
-            color: rgba(255, 255, 255, 0.5);
-            text-shadow: 1px 1px 2px rgba(0, 0, 0, 0.5);
-            font-weight: bold;
-            text-align: center;
-        }
-        .watermark a {
-            color: #ffa500;
-            text-decoration: none;
-            font-weight: bold;
-        }
-        .watermark a:hover {
-            color: #ffa500;
-        }
-
-        @media (max-width: 768px) {
-            .header h1 {
-                font-size: 32px;
-            }
-
-            .config-section h3 {
-                font-size: 24px;
-            }
-
-            .config-block h4 {
-                font-size: 20px;
-            }
-
-            .domain-list {
-                font-size: 10px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="overlay"></div>
-    <div class="container">
-        <div class="header">
-            <h1>ARI ANDIKA KUOTA</h1>
-        </div>
-        <div class="nav-buttons">
-            <button class="button" onclick="showContent('vless')">VERSI VLESS</button>
-            <button class="button" onclick="showContent('clash')">VERSI CLASH</button>
-        </div>
-        <center><a href="https://wa.link/d982tb" class="button">WHATSAPP</a> <a href="https://m.facebook.com/ariy.tool/" class="button">FACEBOOK</a></center><br>
-        <div class="config-section">
-        <strong>LIST WILLCARD : </strong><br>
-        <br>
-        \u2730 ava.game.naver.com<br>
-        \u2730 graph.instagram.com<br>
-        \u2730 quiz.int.vidio.com<br>
-        \u2730 live.iflix.com<br>
-        \u2730 support.zoom.us<br>
-        \u2730 blog.webex.com<br>
-        \u2730 cache.netflix.com<br>
-        \u2730 investors.spotify.com<br>
-        \u2730 zaintest.vuclip.com<br>
-        </div>
-        <hr class="config-divider" />
-        <div id="vless" class="content active">
-            ${vlessConfigs}
-        </div>
-        <div id="clash" class="content">
-            ${clashConfigs}
-        </div>
-    </div>
-    <script>
-        function showContent(contentId) {
-            const contents = document.querySelectorAll('.content');
-            contents.forEach(content => {
-                content.classList.remove('active');
-            });
-            document.getElementById(contentId).classList.add('active');
-        }
-        function salinTeks() {
-            var teks = document.getElementById('teksAsli');
-            teks.select();
-            document.execCommand('copy');
-            alert('Teks telah disalin.');
-        }
-        function copyClash(elementId) {
-            const text = document.getElementById(elementId).textContent;
-            navigator.clipboard.writeText(text)
-            .then(() => {
-            const alertBox = document.createElement('div');
-            alertBox.textContent = "Copied to clipboard!";
-            alertBox.style.position = 'fixed';
-            alertBox.style.bottom = '20px';
-            alertBox.style.right = '20px';
-            alertBox.style.backgroundColor = 'yellow';
-            alertBox.style.color = '#fff';
-            alertBox.style.padding = '10px 20px';
-            alertBox.style.borderRadius = '5px';
-            alertBox.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
-            alertBox.style.opacity = '0';
-            alertBox.style.transition = 'opacity 0.5s ease-in-out';
-            document.body.appendChild(alertBox);
-            setTimeout(() => {
-                alertBox.style.opacity = '1';
-            }, 100);
-            setTimeout(() => {
-                alertBox.style.opacity = '0';
-                setTimeout(() => {
-                    document.body.removeChild(alertBox);
-                }, 500);
-            }, 2000);
-        })
-        .catch((err) => {
-            console.error("Failed to copy to clipboard:", err);
-        });
-        }
-function fetchAndDisplayAlert(path) {
-    fetch(path)
-        .then(response => {
-            if (!response.ok) {
-                throw new Error(\`HTTP error! Status: \${response.status}\`);
-            }
-            return response.json();
-        })
-        .then(data => {
-            const proxyStatus = data.proxyStatus || "Unknown status";
-            const alertBox = document.createElement('div');
-            alertBox.textContent = \`Proxy Status: \${proxyStatus}\`;
-            alertBox.style.position = 'fixed';
-            alertBox.style.bottom = '20px';
-            alertBox.style.right = '20px';
-            alertBox.style.backgroundColor = 'yellow';
-            alertBox.style.color = '#fff';
-            alertBox.style.padding = '10px 20px';
-            alertBox.style.borderRadius = '5px';
-            alertBox.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
-            alertBox.style.opacity = '0';
-            alertBox.style.transition = 'opacity 0.5s ease-in-out';
-            document.body.appendChild(alertBox);
-            
-            setTimeout(() => {
-                alertBox.style.opacity = '1';
-            }, 100);
-            
-            setTimeout(() => {
-                alertBox.style.opacity = '0';
-                setTimeout(() => {
-                    document.body.removeChild(alertBox);
-                }, 500);
-            }, 2000);
-        })
-        .catch((err) => {
-            alert("Failed to fetch data or invalid response.");
-        });
+"SG": [
+    "101.32.247.126:725",
+    "103.180.161.10:587",
+    "103.180.161.69:587",
+    "103.180.161.123:587",
+    "103.3.63.253:46683",
+    "104.248.145.216:443",
+    "104.248.146.212:2053",
+    "104.248.146.212:8443",
+    "104.248.154.142:8443",
+    "104.248.154.142:2053"
+  ],
+  "HK": [
+    "101.32.10.244:10457",
+    "101.32.40.116:8888",
+    "103.103.245.51:16118",
+    "103.127.248.51:443",
+    "103.133.178.229:26010",
+    "103.149.91.215:5888",
+    "103.172.41.223:443",
+    "103.175.14.144:443",
+    "103.195.49.224:1009",
+    "103.195.49.225:1009"
+  ],
+  "KR": [
+    "1.221.220.170:50000",
+    "1.251.127.235:50003",
+    "1.221.195.172:50000",
+    "1.251.127.235:30011",
+    "1.214.208.5:50000",
+    "1.215.13.99:30063",
+    "1.249.4.71:50002",
+    "1.251.127.235:28808",
+    "1.220.189.156:23470",
+    "1.176.166.137:30012"
+  ],
+  "JP": [
+    "101.1.134.125:12026",
+    "103.106.228.126:2053",
+    "103.106.228.67:2053",
+    "103.106.228.67:8443",
+    "103.160.100.205:29844",
+    "103.20.199.101:33004",
+    "103.20.199.166:6666",
+    "103.20.199.118:12999",
+    "103.20.199.196:8882",
+    "103.193.150.173:54310"
+  ],
+  "FR": [
+    "103.102.231.231:2053",
+    "103.102.231.233:2053",
+    "103.102.231.204:2053",
+    "103.102.231.215:2053",
+    "103.102.231.218:2053",
+    "103.102.231.232:2053",
+    "103.102.231.228:2053",
+    "103.102.231.199:2053",
+    "103.102.231.189:2053",
+    "103.102.231.21:2053"
+  ],
+  "NL": [
+    "103.102.228.178:443",
+    "103.102.228.113:443",
+    "103.137.248.17:443",
+    "103.137.249.117:443",
+    "103.45.247.134:443",
+    "103.45.247.251:8443",
+    "103.45.247.67:443",
+    "103.45.247.251:2053",
+    "103.90.73.16:443",
+    "103.90.75.141:2053"
+  ],
+  "ID": [
+    "103.133.223.52:2096",
+    "103.133.223.51:2096",
+    "103.133.223.50:2096",
+    "103.186.1.209:2053",
+    "103.6.207.108:8080",
+    "172.232.239.134:587",
+    "172.232.231.24:587",
+    "172.232.239.175:587",
+    "172.232.239.147:587",
+    "172.232.239.151:587"
+  ],
+  "IN": [
+    "103.111.114.79:443",
+    "103.149.165.47:443",
+    "115.242.180.202:19000",
+    "128.199.18.189:2053",
+    "129.154.46.115:443",
+    "13.233.5.49:443",
+    "129.159.22.4:443",
+    "134.195.137.107:22473",
+    "139.59.48.26:8443",
+    "141.148.203.6:443"
+  ],
+  "CN": [
+    "103.115.44.87:49323",
+    "103.115.40.154:33981",
+    "103.115.44.87:49322",
+    "134.122.185.75:25507",
+    "156.230.12.71:443",
+    "192.3.113.4:19318",
+    "23.94.255.55:3306"
+  ],
+  "TW": [
+    "103.137.63.205:31564",
+    "103.159.207.168:2086",
+    "103.159.206.159:32819",
+    "103.159.207.168:2443",
+    "103.159.207.172:2086",
+    "103.159.207.172:2443",
+    "103.106.230.186:81",
+    "106.105.199.173:38309",
+    "112.104.167.63:11873",
+    "112.104.167.63:16854"
+  ],
+  "VN": [
+    "103.186.146.213:49328",
+    "103.15.90.134:49678",
+    "103.45.232.251:50678",
+    "103.98.149.96:58904",
+    "152.32.255.24:587",
+    "38.54.30.6:443"
+  ],
+  "TH": [
+    "103.118.40.118:42015",
+    "128.1.79.171:587",
+    "171.103.16.153:10252",
+    "171.103.13.77:25645",
+    "171.103.16.151:39392",
+    "171.103.14.137:32700",
+    "171.103.164.62:30921",
+    "171.103.15.91:39967",
+    "171.103.232.58:20475",
+    "171.103.225.138:31414"
+  ],
+  "MD": [
+    "103.106.1.2:443",
+    "103.106.1.211:443",
+    "103.231.73.10:8443",
+    "103.231.73.151:2053",
+    "103.231.73.10:2053",
+    "103.231.73.149:2053",
+    "103.231.73.117:443",
+    "103.231.73.126:8443",
+    "103.231.73.166:2053",
+    "103.231.73.153:443"
+  ],
+  "US": [
+    "103.114.162.78:25565",
+    "103.170.72.120:25111",
+    "103.170.72.120:25122",
+    "103.170.72.120:27013",
+    "103.170.72.120:27051",
+    "103.170.72.129:27053",
+    "103.170.72.129:27054",
+    "103.170.72.129:25122",
+    "103.170.72.120:25956",
+    "103.170.72.120:27033"
+  ],
+  "LT": [
+    "103.113.69.46:443",
+    "103.113.69.99:443",
+    "194.0.194.222:443",
+    "194.0.194.145:443",
+    "194.0.194.237:14181",
+    "195.238.126.52:443",
+    "195.238.126.94:443",
+    "212.80.216.207:443",
+    "213.252.232.129:443",
+    "45.154.35.160:443"
+  ],
+  "GB": [
+    "103.13.208.242:443",
+    "104.128.190.209:443",
+    "104.128.190.65:443",
+    "104.218.164.180:587",
+    "109.169.76.23:443",
+    "109.61.95.21:8080",
+    "118.26.104.15:587",
+    "130.185.249.22:8080",
+    "130.185.249.100:443",
+    "132.145.54.84:2053"
+  ],
+  "AL": [
+    "103.167.234.131:8443",
+    "103.167.234.131:2053",
+    "31.171.152.217:8443",
+    "31.171.152.215:8443",
+    "31.171.152.210:8443",
+    "31.171.152.216:8443",
+    "31.171.152.218:8443",
+    "31.171.152.219:8443",
+    "31.171.152.222:8443",
+    "31.171.152.221:8443"
+  ],
+  "AU": [
+    "103.65.140.115:12224",
+    "125.7.24.251:443",
+    "13.54.198.183:443",
+    "130.162.193.183:15401",
+    "139.99.236.163:443",
+    "149.28.162.204:443",
+    "152.67.101.72:23010",
+    "152.67.102.161:19286",
+    "152.69.174.99:25248",
+    "152.69.165.68:44242"
+  ],
+  "TR": [
+    "103.215.218.33:8080",
+    "104.239.87.197:2053",
+    "109.61.43.191:443",
+    "156.67.63.233:2053",
+    "154.53.166.178:443",
+    "176.116.6.86:8443",
+    "176.223.66.5:8080",
+    "176.33.95.240:12560",
+    "185.113.223.85:8080",
+    "185.181.210.171:8443"
+  ],
+  "IT": [
+    "103.241.66.68:8443",
+    "103.241.66.68:2053",
+    "129.152.2.127:1488",
+    "147.45.51.47:14946",
+    "147.45.51.68:20013",
+    "147.45.51.68:2053",
+    "147.45.51.47:18534",
+    "158.180.233.125:55137",
+    "172.232.195.178:2053",
+    "172.232.195.178:8443"
+  ],
+  "ES": [
+    "103.45.245.201:29016",
+    "103.45.245.191:502",
+    "103.45.245.201:59889",
+    "103.45.245.208:2053",
+    "103.45.245.208:8443",
+    "151.80.182.174:2053",
+    "176.120.74.53:443",
+    "176.57.104.51:22181",
+    "176.97.72.18:443",
+    "185.110.17.42:34834"
+  ],
+  "SE": [
+    "103.45.246.124:28564",
+    "103.45.246.124:23137",
+    "103.45.246.124:33142",
+    "103.45.246.124:41844",
+    "103.45.246.124:36388",
+    "103.45.246.124:33801",
+    "103.45.246.124:46606",
+    "103.45.246.124:53529",
+    "103.45.246.35:28564",
+    "103.45.246.35:33801"
+  ],
+  "CA": [
+    "103.98.215.83:8443",
+    "104.234.36.27:33388",
+    "104.234.240.179:8443",
+    "104.234.240.114:8443",
+    "104.234.240.114:2053",
+    "104.234.240.179:2053",
+    "104.234.60.180:443",
+    "137.184.168.222:2053",
+    "137.184.168.222:8443",
+    "138.197.152.31:8443"
+  ],
+  "KZ": [
+    "103.106.3.238:443",
+    "188.116.20.93:443",
+    "188.225.31.62:443",
+    "194.135.25.23:53282",
+    "194.135.25.23:46571",
+    "194.135.25.23:34902",
+    "194.135.25.23:58183",
+    "194.135.25.23:13554",
+    "194.135.25.23:50995",
+    "194.135.25.23:36874"
+  ],
+  "LU": [
+    "104.244.77.65:8443",
+    "104.244.78.95:2083",
+    "107.189.8.158:443",
+    "172.86.78.221:2096",
+    "198.251.84.123:8443",
+    "45.80.209.166:2053",
+    "45.80.209.31:34424",
+    "45.80.209.31:47784"
+  ],
+  "DE": [
+    "104.248.100.121:443",
+    "104.248.128.137:443",
+    "104.248.16.87:443",
+    "104.248.17.101:443",
+    "104.248.36.29:443",
+    "104.248.247.31:8443",
+    "104.248.240.145:3015",
+    "104.248.247.105:443",
+    "104.248.241.182:443",
+    "108.61.178.15:8443"
+  ],
+  "RU": [
+    "109.107.189.148:2053",
+    "109.107.189.148:8420",
+    "109.172.85.54:2053",
+    "109.172.84.237:443",
+    "109.172.88.189:2053",
+    "109.120.189.103:1488",
+    "109.172.85.54:8443",
+    "109.71.242.105:2053",
+    "109.71.242.105:8443",
+    "121.127.37.225:2053"
+  ],
+  "FI": [
+    "109.107.190.184:8443",
+    "109.107.190.184:2053",
+    "109.107.190.206:2053",
+    "109.107.190.235:2053",
+    "109.107.190.251:2053",
+    "109.107.190.251:8443",
+    "109.107.190.40:2053",
+    "109.107.190.3:2053",
+    "109.107.190.3:8443",
+    "109.107.190.40:8443"
+  ],
+  "AZ": [
+    "109.205.214.8:443"
+  ],
+  "PL": [
+    "109.197.185.121:18333",
+    "145.239.88.255:2053",
+    "145.239.88.255:8443",
+    "145.239.85.117:8443",
+    "145.239.85.117:2053",
+    "145.239.90.225:443",
+    "146.19.170.78:2053",
+    "146.70.85.66:8443",
+    "146.70.85.88:8443",
+    "146.70.85.86:8443"
+  ],
+  "LV": [
+    "109.237.97.129:443",
+    "138.124.182.204:443",
+    "147.45.196.70:443",
+    "147.45.197.119:443",
+    "147.45.197.163:50080",
+    "178.248.75.36:8443",
+    "178.248.75.36:2053",
+    "185.135.86.120:2053",
+    "185.135.86.116:2053",
+    "185.135.86.207:443"
+  ],
+  "AE": [
+    "109.61.42.167:6633",
+    "109.61.42.25:2049",
+    "109.61.42.25:2059",
+    "109.61.42.25:6533",
+    "109.61.42.53:8081",
+    "129.151.128.114:34834",
+    "129.151.128.105:16731",
+    "129.151.149.168:25061",
+    "129.151.148.35:443",
+    "139.185.34.131:443"
+  ],
+  "NZ": [
+    "119.224.58.125:443"
+  ],
+  "MY": [
+    "123.253.33.182:12306",
+    "154.83.86.52:55555",
+    "154.90.39.188:48071",
+    "210.186.12.244:443",
+    "45.195.69.98:30726",
+    "45.195.76.190:29690",
+    "83.142.30.129:2096",
+    "45.159.51.121:32199"
+  ],
+  "IL": [
+    "129.159.132.0:2053",
+    "129.159.132.0:8443",
+    "185.239.48.97:8443",
+    "185.239.48.97:2053",
+    "20.217.216.51:2053",
+    "212.80.205.244:2053",
+    "212.80.205.244:8443",
+    "5.29.142.200:2053",
+    "5.29.142.200:8443",
+    "64.176.167.241:8443"
+  ],
+  "UA": [
+    "130.0.234.178:26884",
+    "194.38.20.78:443",
+    "45.137.155.232:433",
+    "45.153.229.108:1982",
+    "45.153.229.108:1983",
+    "45.153.229.108:1980",
+    "5.206.227.243:41086",
+    "82.118.22.141:2053",
+    "82.118.22.141:8443",
+    "91.218.212.223:443"
+  ],
+  "BR": [
+    "132.226.163.224:8443",
+    "132.226.163.224:2053",
+    "144.22.252.124:443",
+    "144.22.144.168:4242",
+    "144.22.204.102:50317",
+    "146.235.59.153:8443",
+    "146.235.59.153:2053",
+    "147.45.116.61:8443",
+    "147.45.116.50:24443",
+    "152.70.214.15:11987"
+  ],
+  "MO": [
+    "138.2.124.28:31698"
+  ],
+  "AM": [
+    "139.45.214.118:443",
+    "139.45.214.58:443",
+    "194.156.103.31:8443",
+    "194.156.103.58:41210",
+    "2.56.204.183:443",
+    "2.56.205.182:2053",
+    "2.56.204.156:8080",
+    "2.56.205.182:8443",
+    "2.56.206.114:8443",
+    "2.56.206.114:2053"
+  ],
+  "CH": [
+    "140.238.212.95:443",
+    "144.24.243.207:443",
+    "144.24.248.38:587",
+    "176.10.125.114:443",
+    "176.10.97.93:443",
+    "179.43.144.10:8000",
+    "179.43.156.113:13338",
+    "179.43.155.21:443",
+    "179.43.176.163:443",
+    "179.43.176.163:10443"
+  ],
+  "MX": [
+    "140.84.167.39:23010",
+    "140.84.179.114:443",
+    "140.84.178.238:23010",
+    "158.23.81.224:2053",
+    "201.149.15.14:21585",
+    "216.238.71.107:443"
+  ],
+  "RO": [
+    "146.19.75.41:8443",
+    "146.70.254.231:8443",
+    "146.70.254.235:8443",
+    "146.70.254.232:8443",
+    "146.70.254.237:8443",
+    "146.70.254.236:8443",
+    "146.70.254.234:8443",
+    "146.70.254.233:8443",
+    "146.70.254.238:8443",
+    "176.97.76.164:22053"
+  ],
+  "AT": [
+    "147.45.41.0:2053",
+    "147.45.41.0:8880",
+    "147.45.41.12:2053",
+    "147.45.41.139:8443",
+    "147.45.41.155:2053",
+    "147.45.41.198:2053",
+    "147.45.41.209:443",
+    "147.45.41.153:2053",
+    "147.45.71.143:8880",
+    "147.45.71.180:2053"
+  ],
+  "SC": [
+    "154.91.34.39:8443",
+    "185.58.204.49:443"
+  ],
+  "SA": [
+    "158.101.247.242:22343"
+  ],
+  "BG": [
+    "158.58.237.156:10809",
+    "185.177.59.147:443",
+    "185.216.68.91:443",
+    "185.232.170.30:443",
+    "185.237.219.169:443",
+    "185.247.57.89:27089",
+    "185.247.56.157:11387",
+    "185.247.56.157:10284",
+    "185.247.57.89:30498",
+    "185.247.56.157:29743"
+  ],
+  "CY": [
+    "171.22.120.111:443",
+    "171.22.120.156:2053",
+    "171.22.120.156:8443",
+    "185.106.103.168:443",
+    "185.153.181.173:2053",
+    "185.153.181.173:8443",
+    "185.153.182.182:8443",
+    "185.153.181.200:2053",
+    "185.153.182.58:2053",
+    "185.153.182.182:2053"
+  ],
+  "IR": [
+    "178.253.23.43:443",
+    "178.253.23.199:8443",
+    "81.31.245.115:1337",
+    "81.31.245.122:443",
+    "81.31.245.115:7777",
+    "83.147.247.249:2053",
+    "81.31.245.22:443",
+    "94.241.174.229:443",
+    "94.241.174.207:443",
+    "94.241.174.28:443"
+  ],
+  "CO": [
+    "181.48.111.13:21783",
+    "181.48.111.13:28472",
+    "181.48.201.10:18649",
+    "181.48.201.10:30203",
+    "181.48.111.13:32726",
+    "181.48.201.10:24341"
+  ],
+  "EE": [
+    "185.164.163.185:443",
+    "37.252.5.75:443",
+    "38.180.10.150:443",
+    "38.180.10.162:443",
+    "45.129.199.232:443",
+    "45.82.253.187:8443",
+    "5.101.179.28:443",
+    "5.101.180.145:443",
+    "94.131.15.113:443",
+    "95.164.8.46:443"
+  ],
+  "AR": [
+    "190.183.61.62:8443",
+    "190.183.61.62:2053",
+    "31.40.212.216:8443"
+  ],
+  "T1": [
+    "192.210.203.52:8443"
+  ],
+  "CZ": [
+    "194.58.39.80:443",
+    "194.87.11.56:8000",
+    "195.133.65.195:2053",
+    "195.133.64.12:443",
+    "195.133.64.185:443",
+    "38.180.48.228:443",
+    "80.211.194.250:443",
+    "81.91.214.162:443",
+    "81.91.214.85:443",
+    "94.23.170.124:2053"
+  ],
+  "QA": [
+    "20.173.66.64:2053"
+  ],
+  "DK": [
+    "217.78.237.53:2053",
+    "217.78.237.53:27443",
+    "38.180.20.59:2053",
+    "38.180.20.59:8443",
+    "38.180.214.40:443",
+    "38.180.72.160:443",
+    "38.180.72.65:8443",
+    "38.180.72.65:2053",
+    "38.180.72.162:2053",
+    "45.136.70.251:2053"
+  ],
+  "IE": [
+    "3.249.49.224:443",
+    "34.243.68.254:443",
+    "34.253.234.62:443",
+    "38.180.21.33:443",
+    "40.113.60.248:8443",
+    "40.113.60.248:2053",
+    "52.169.27.133:2053",
+    "52.19.178.111:8443",
+    "52.213.11.150:443",
+    "52.49.41.80:2053"
+  ],
+  "PT": [
+    "31.129.22.77:443",
+    "45.159.251.8:81"
+  ],
+  "BE": [
+    "34.22.142.117:443",
+    "34.22.190.30:443",
+    "93.185.165.63:443",
+    "95.164.62.196:443"
+  ],
+  "RS": [
+    "38.180.101.177:443",
+    "38.180.100.80:443"
+  ],
+  "ZA": [
+    "4.221.60.243:2053"
+  ],
+  "MU": [
+    "41.76.42.116:443",
+    "41.76.42.118:443"
+  ],
+  "SI": [
+    "45.146.234.144:28217"
+  ],
+  "HU": [
+    "46.183.186.57:443",
+    "5.182.38.183:443",
+    "77.91.72.252:443",
+    "95.164.23.71:443"
+  ],
+  "SK": [
+    "5.180.55.184:2053",
+    "5.180.55.220:8443"
+  ],
+  "PH": [
+    "61.245.11.69:2053"
+  ],
+  "PR": [
+    "76.72.247.50:37456"
+  ],
+  "UZ": [
+    "92.223.44.19:2096"
+  ],
+  "GI": [
+    "95.164.0.155:443",
+    "95.164.0.163:2053",
+    "95.164.0.240:8443",
+    "95.164.0.240:2053",
+    "95.164.0.219:443",
+    "95.164.3.169:443",
+    "95.164.89.124:2053",
+    "95.164.5.86:2053",
+    "95.164.5.86:8443"
+  ]
 }
-        function copyToClipboard(text) {
-            navigator.clipboard.writeText(text)
-                .then(() => {
-                    const alertBox = document.createElement('div');
-                    alertBox.textContent = "Copied to clipboard!";
-                    alertBox.style.position = 'fixed';
-                    alertBox.style.bottom = '20px';
-                    alertBox.style.right = '20px';
-                    alertBox.style.backgroundColor = 'yellow';
-                    alertBox.style.color = '#fff';
-                    alertBox.style.padding = '10px 20px';
-                    alertBox.style.borderRadius = '5px';
-                    alertBox.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)';
-                    alertBox.style.opacity = '0';
-                    alertBox.style.transition = 'opacity 0.5s ease-in-out';
-                    document.body.appendChild(alertBox);
-                    setTimeout(() => {
-                        alertBox.style.opacity = '1';
-                    }, 100);
-                    setTimeout(() => {
-                        alertBox.style.opacity = '0';
-                        setTimeout(() => {
-                            document.body.removeChild(alertBox);
-                        }, 500);
-                    }, 2000);
-                })
-                .catch((err) => {
-                    console.error("Failed to copy to clipboard:", err);
-                });
-        }
-
-        function toggleConfig(button, show, hide) {
-            const configContent = button.nextElementSibling;
-            if (configContent.classList.contains('active')) {
-                configContent.classList.remove('active');
-                button.textContent = show;
-            } else {
-                configContent.classList.add('active');
-                button.textContent = hide;
-            }
-        }
-    <\/script>
-</body>
-</html>`;
-    return htmlConfigs;
-  } catch (error) {
-    return `An error occurred while generating the VLESS configurations. ${error}`;
-  }
-}
-
-function generateUUIDv4() {
-  const randomValues = crypto.getRandomValues(new Uint8Array(16));
-  randomValues[6] = randomValues[6] & 15 | 64;
-  randomValues[8] = randomValues[8] & 63 | 128;
-  return [
-    randomValues[0].toString(16).padStart(2, "0"),
-    randomValues[1].toString(16).padStart(2, "0"),
-    randomValues[2].toString(16).padStart(2, "0"),
-    randomValues[3].toString(16).padStart(2, "0"),
-    randomValues[4].toString(16).padStart(2, "0"),
-    randomValues[5].toString(16).padStart(2, "0"),
-    randomValues[6].toString(16).padStart(2, "0"),
-    randomValues[7].toString(16).padStart(2, "0"),
-    randomValues[8].toString(16).padStart(2, "0"),
-    randomValues[9].toString(16).padStart(2, "0"),
-    randomValues[10].toString(16).padStart(2, "0"),
-    randomValues[11].toString(16).padStart(2, "0"),
-    randomValues[12].toString(16).padStart(2, "0"),
-    randomValues[13].toString(16).padStart(2, "0"),
-    randomValues[14].toString(16).padStart(2, "0"),
-    randomValues[15].toString(16).padStart(2, "0")
-  ].join("").replace(/^(.{8})(.{4})(.{4})(.{4})(.{12})$/, "$1-$2-$3-$4-$5");
-}
-
-async function vlessOverWSHandler(request) {
-  const webSocketPair = new WebSocketPair();
-  const [client, webSocket] = Object.values(webSocketPair);
-  webSocket.accept();
-  let address = "";
-  let portWithRandomLog = "";
-  const log = (info, event) => {
-    console.log(`[${address}:${portWithRandomLog}] ${info}`, event || "");
-  };
-  const earlyDataHeader = request.headers.get("sec-websocket-protocol") || "";
-  const readableWebSocketStream = makeReadableWebSocketStream(webSocket, earlyDataHeader, log);
-  let remoteSocketWapper = {
-    value: null
-  };
-  let udpStreamWrite = null;
-  let isDns = false;
-  readableWebSocketStream.pipeTo(new WritableStream({
-    async write(chunk, controller) {
-      if (isDns && udpStreamWrite) {
-        return udpStreamWrite(chunk);
-      }
-      if (remoteSocketWapper.value) {
-        const writer = remoteSocketWapper.value.writable.getWriter();
-        await writer.write(chunk);
-        writer.releaseLock();
-        return;
-      }
-      const {
-        hasError,
-        message,
-        portRemote = 443,
-        addressRemote = "",
-        rawDataIndex,
-        vlessVersion = new Uint8Array([0, 0]),
-        isUDP
-      } = processVlessHeader(chunk);
-      address = addressRemote;
-      portWithRandomLog = `${portRemote}--${Math.random()} ${isUDP ? "udp " : "tcp "} `;
-      if (hasError) {
-        throw new Error(message);
-        return;
-      }
-      if (isUDP) {
-        if (portRemote === 53) {
-          isDns = true;
-        } else {
-          throw new Error("UDP proxy only enable for DNS which is port 53");
-          return;
-        }
-      }
-      const vlessResponseHeader = new Uint8Array([vlessVersion[0], 0]);
-      const rawClientData = chunk.slice(rawDataIndex);
-      if (isDns) {
-        const { write } = await handleUDPOutBound(webSocket, vlessResponseHeader, log);
-        udpStreamWrite = write;
-        udpStreamWrite(rawClientData);
-        return;
-      }
-      handleTCPOutBound(remoteSocketWapper, addressRemote, portRemote, rawClientData, webSocket, vlessResponseHeader, log);
-    },
-    close() {
-      log(`readableWebSocketStream is close`);
-    },
-    abort(reason) {
-      log(`readableWebSocketStream is abort`, JSON.stringify(reason));
-    }
-  })).catch((err) => {
-    log("readableWebSocketStream pipeTo error", err);
-  });
-  return new Response(null, {
-    status: 101,
-    webSocket: client
-  });
-}
-
-async function handleTCPOutBound(remoteSocket, addressRemote, portRemote, rawClientData, webSocket, vlessResponseHeader, log) {
-  async function connectAndWrite(address, port) {
-    const tcpSocket2 = connect({
-      hostname: address,
-      port
-    });
-    remoteSocket.value = tcpSocket2;
-    log(`connected to ${address}:${port}`);
-    const writer = tcpSocket2.writable.getWriter();
-    await writer.write(rawClientData);
-    writer.releaseLock();
-    return tcpSocket2;
-  }
-  async function retry() {
-    const [proxyAddress, proxyPort] = proxyIP.split(":");
-    const tcpSocket2 = await connectAndWrite(proxyAddress || addressRemote, proxyPort || portRemote);
-    tcpSocket2.closed.catch((error) => {
-      console.log("retry tcpSocket closed error", error);
-    }).finally(() => {
-      safeCloseWebSocket(webSocket);
-    });
-    remoteSocketToWS(tcpSocket2, webSocket, vlessResponseHeader, null, log);
-  }
-  const tcpSocket = await connectAndWrite(addressRemote, portRemote);
-  remoteSocketToWS(tcpSocket, webSocket, vlessResponseHeader, retry, log);
-}
-
-function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, log) {
-  let readableStreamCancel = false;
-  const stream = new ReadableStream({
-    start(controller) {
-      webSocketServer.addEventListener("message", (event) => {
-        if (readableStreamCancel) {
-          return;
-        }
-        const message = event.data;
-        controller.enqueue(message);
-      });
-      webSocketServer.addEventListener(
-        "close",
-        () => {
-          safeCloseWebSocket(webSocketServer);
-          if (readableStreamCancel) {
-            return;
-          }
-          controller.close();
-        }
-      );
-      webSocketServer.addEventListener(
-        "error",
-        (err) => {
-          log("webSocketServer has error");
-          controller.error(err);
-        }
-      );
-      const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
-      if (error) {
-        controller.error(error);
-      } else if (earlyData) {
-        controller.enqueue(earlyData);
-      }
-    },
-    pull(controller) {
-    },
-    cancel(reason) {
-      if (readableStreamCancel) {
-        return;
-      }
-      log(`ReadableStream was canceled, due to ${reason}`);
-      readableStreamCancel = true;
-      safeCloseWebSocket(webSocketServer);
-    }
-  });
-  return stream;
-}
-
-function processVlessHeader(vlessBuffer) {
-  if (vlessBuffer.byteLength < 24) {
-    return {
-      hasError: true,
-      message: "invalid data"
-    };
-  }
-  const version = new Uint8Array(vlessBuffer.slice(0, 1));
-  let isValidUser = true;
-  let isUDP = false;
-  if (!isValidUser) {
-    return {
-      hasError: true,
-      message: "invalid user"
-    };
-  }
-  const optLength = new Uint8Array(vlessBuffer.slice(17, 18))[0];
-  const command = new Uint8Array(
-    vlessBuffer.slice(18 + optLength, 18 + optLength + 1)
-  )[0];
-  if (command === 1) {
-  } else if (command === 2) {
-    isUDP = true;
-  } else {
-    return {
-      hasError: true,
-      message: `command ${command} is not support, command 01-tcp,02-udp,03-mux`
-    };
-  }
-  const portIndex = 18 + optLength + 1;
-  const portBuffer = vlessBuffer.slice(portIndex, portIndex + 2);
-  const portRemote = new DataView(portBuffer).getUint16(0);
-  let addressIndex = portIndex + 2;
-  const addressBuffer = new Uint8Array(
-    vlessBuffer.slice(addressIndex, addressIndex + 1)
-  );
-  const addressType = addressBuffer[0];
-  let addressLength = 0;
-  let addressValueIndex = addressIndex + 1;
-  let addressValue = "";
-  switch (addressType) {
-    case 1:
-      addressLength = 4;
-      addressValue = new Uint8Array(
-        vlessBuffer.slice(addressValueIndex, addressValueIndex + addressLength)
-      ).join(".");
-      break;
-    case 2:
-      addressLength = new Uint8Array(
-        vlessBuffer.slice(addressValueIndex, addressValueIndex + 1)
-      )[0];
-      addressValueIndex += 1;
-      addressValue = new TextDecoder().decode(
-        vlessBuffer.slice(addressValueIndex, addressValueIndex + addressLength)
-      );
-      break;
-    case 3:
-      addressLength = 16;
-      const dataView = new DataView(
-        vlessBuffer.slice(addressValueIndex, addressValueIndex + addressLength)
-      );
-      const ipv6 = [];
-      for (let i = 0; i < 8; i++) {
-        ipv6.push(dataView.getUint16(i * 2).toString(16));
-      }
-      addressValue = ipv6.join(":");
-      break;
-    default:
-      return {
-        hasError: true,
-        message: `invild  addressType is ${addressType}`
-      };
-  }
-  if (!addressValue) {
-    return {
-      hasError: true,
-      message: `addressValue is empty, addressType is ${addressType}`
-    };
-  }
-  return {
-    hasError: false,
-    addressRemote: addressValue,
-    addressType,
-    portRemote,
-    rawDataIndex: addressValueIndex + addressLength,
-    vlessVersion: version,
-    isUDP
-  };
-}
-
-async function remoteSocketToWS(remoteSocket, webSocket, vlessResponseHeader, retry, log) {
-  let remoteChunkCount = 0;
-  let chunks = [];
-  let vlessHeader = vlessResponseHeader;
-  let hasIncomingData = false;
-  await remoteSocket.readable.pipeTo(
-    new WritableStream({
-      start() {
-      },
-      async write(chunk, controller) {
-        hasIncomingData = true;
-        if (webSocket.readyState !== WS_READY_STATE_OPEN) {
-          controller.error(
-            "webSocket.readyState is not open, maybe close"
-          );
-        }
-        if (vlessHeader) {
-          webSocket.send(await new Blob([vlessHeader, chunk]).arrayBuffer());
-          vlessHeader = null;
-        } else {
-          webSocket.send(chunk);
-        }
-      },
-      close() {
-        log(`remoteConnection!.readable is close with hasIncomingData is ${hasIncomingData}`);
-      },
-      abort(reason) {
-        console.error(`remoteConnection!.readable abort`, reason);
-      }
-    })
-  ).catch((error) => {
-    console.error(
-      `remoteSocketToWS has exception `,
-      error.stack || error
-    );
-    safeCloseWebSocket(webSocket);
-  });
-  if (hasIncomingData === false && retry) {
-    log(`retry`);
-    retry();
-  }
-}
-
-function base64ToArrayBuffer(base64Str) {
-  if (!base64Str) {
-    return { error: null };
-  }
-  try {
-    base64Str = base64Str.replace(/-/g, "+").replace(/_/g, "/");
-    const decode = atob(base64Str);
-    const arryBuffer = Uint8Array.from(decode, (c) => c.charCodeAt(0));
-    return { earlyData: arryBuffer.buffer, error: null };
-  } catch (error) {
-    return { error };
-  }
-}
-
-var WS_READY_STATE_OPEN = 1;
-var WS_READY_STATE_CLOSING = 2;
-
-function safeCloseWebSocket(socket) {
-  try {
-    if (socket.readyState === WS_READY_STATE_OPEN || socket.readyState === WS_READY_STATE_CLOSING) {
-      socket.close();
-    }
-  } catch (error) {
-    console.error("safeCloseWebSocket error", error);
-  }
-}
-
-async function handleUDPOutBound(webSocket, vlessResponseHeader, log) {
-  let isVlessHeaderSent = false;
-  const transformStream = new TransformStream({
-    start(controller) {
-    },
-    transform(chunk, controller) {
-      for (let index = 0; index < chunk.byteLength; ) {
-        const lengthBuffer = chunk.slice(index, index + 2);
-        const udpPakcetLength = new DataView(lengthBuffer).getUint16(0);
-        const udpData = new Uint8Array(
-          chunk.slice(index + 2, index + 2 + udpPakcetLength)
-        );
-        index = index + 2 + udpPakcetLength;
-        controller.enqueue(udpData);
-      }
-    },
-    flush(controller) {
-    }
-  });
-  transformStream.readable.pipeTo(new WritableStream({
-    async write(chunk) {
-      const resp = await fetch(
-        "https://1.1.1.1/dns-query",
-        {
-          method: "POST",
-          headers: {
-            "content-type": "application/dns-message"
-          },
-          body: chunk
-        }
-      );
-      const dnsQueryResult = await resp.arrayBuffer();
-      const udpSize = dnsQueryResult.byteLength;
-      const udpSizeBuffer = new Uint8Array([udpSize >> 8 & 255, udpSize & 255]);
-      if (webSocket.readyState === WS_READY_STATE_OPEN) {
-        log(`doh success and dns message length is ${udpSize}`);
-        if (isVlessHeaderSent) {
-          webSocket.send(await new Blob([udpSizeBuffer, dnsQueryResult]).arrayBuffer());
-        } else {
-          webSocket.send(await new Blob([vlessResponseHeader, udpSizeBuffer, dnsQueryResult]).arrayBuffer());
-          isVlessHeaderSent = true;
-        }
-      }
-    }
-  })).catch((error) => {
-    log("dns udp has error" + error);
-  });
-  const writer = transformStream.writable.getWriter();
-  return {
-    write(chunk) {
-      writer.write(chunk);
-    }
-  };
-}
-
-export {
-  worker_default as default
-};
-//# sourceMappingURL=worker.js.map
