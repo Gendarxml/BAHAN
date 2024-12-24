@@ -38,8 +38,8 @@ Klik di bawah untuk mencari proxy aktif:
 Silakan kirim proxy dan port sekarang!
 `;
 
-        // Kirim sambutan dengan foto profil
-        await sendMessage(chatId, welcomeMessage, "https://www.example.com/your-photo.jpg");
+        // Kirim sambutan tanpa foto, tetap mempertahankan link GitHub
+        await sendMessage(chatId, welcomeMessage);
         return new Response("OK");
       }
 
@@ -50,7 +50,7 @@ Silakan kirim proxy dan port sekarang!
           return sendMessage(chatId, `❌ Format salah! Kirim dengan format Proxy:Port\nContoh: 192.168.1.1:443`);
         }
 
-        // Generate akun Trojan dan VLESS dengan nama sesuai proxy
+        // Generate akun Trojan dan VLESS dengan nama ID Telegram
         const vlessLink = generateVlessLink(proxy, port);
         const trojanLink = generateTrojanLink(proxy, port);
 
@@ -97,19 +97,6 @@ async function sendMessage(chatId, text, photoUrl = null) {
     if (!response.ok) {
       throw new Error(`Telegram API responded with status: ${response.status}`);
     }
-
-    // Jika ada foto, kirim foto ke Telegram
-    if (photoUrl) {
-      const photoRequest = {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          chat_id: chatId,
-          photo: photoUrl,
-        })
-      };
-      await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendPhoto`, photoRequest);
-    }
   } catch (error) {
     console.error('Error sending message to Telegram:', error); // Log error if message sending fails
   }
@@ -130,12 +117,12 @@ function validatePort(port) {
   return num >= 1 && num <= 65535;
 }
 
-// Generate VLESS Link dengan nama akun sesuai proxy
+// Generate VLESS Link dengan nama Telegram
 function generateVlessLink(proxy, port) {
-  return `vless://${passuid}@${servervless}:443?encryption=none&security=tls&sni=${servervless}&fp=randomized&type=ws&host=${servervless}&path=%2F${proxy}%3A${port}#VLESS_${proxy}_${port}`;
+  return `vless://${passuid}@${servervless}:443?encryption=none&security=tls&sni=${servervless}&fp=randomized&type=ws&host=${servervless}&path=%2F${proxy}%3A${port}#${TELEGRAM_USER_ID}`;
 }
 
-// Generate Trojan Link dengan nama akun sesuai proxy
+// Generate Trojan Link dengan nama Telegram
 function generateTrojanLink(proxy, port) {
-  return `trojan://${passuid}@${servertrojan}:443?encryption=none&security=tls&sni=${servertrojan}&fp=randomized&type=ws&host=${servertrojan}&path=%2F${proxy}%3A${port}#Trojan_${proxy}_${port}`;
+  return `trojan://${passuid}@${servertrojan}:443?encryption=none&security=tls&sni=${servertrojan}&fp=randomized&type=ws&host=${servertrojan}&path=%2F${proxy}%3A${port}#${TELEGRAM_USER_ID}`;
 }
